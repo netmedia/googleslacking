@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Thin, hand-written REST clients for Chat, Workspace Events, People and Pub/Sub.
+       No Google SDK dependency: full control over payloads, retries and quotas. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="GoogleSlacking.Tests" />
+  </ItemGroup>
+</Project>

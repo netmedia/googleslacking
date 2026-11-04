@@ -1,0 +1,15 @@
+bin/
+obj/
+.vs/
+.idea/
+*.user
+appsettings.Local.json
+*.local.json
+.claude/settings.local.json
+secrets/
+*.pem
+service-account*.json
+node_modules/
+web/dist/
+src/GoogleSlacking.Api/wwwroot/
+*.tsbuildinfo
