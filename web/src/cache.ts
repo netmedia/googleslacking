@@ -6,14 +6,28 @@ export const keys = {
   spaces: ['spaces'] as const,
   messages: (spaceId: string) => ['messages', spaceId] as const,
   thread: (spaceId: string, threadName: string) => ['thread', spaceId, threadName] as const,
+  settings: ['settings'] as const,
+  presence: ['presence'] as const,
+  sections: ['sections'] as const,
+  activity: ['activity'] as const,
+  saved: (completed = false) => ['saved', completed] as const,
+  scheduled: ['scheduled'] as const,
+  drafts: ['drafts'] as const,
+  members: (spaceId: string) => ['members', spaceId] as const,
+  pins: (spaceId: string) => ['pins', spaceId] as const,
+  bookmarks: (spaceId: string) => ['bookmarks', spaceId] as const,
+  receipts: (spaceId: string) => ['receipts', spaceId] as const,
+  unfurl: (url: string) => ['unfurl', url] as const,
+  search: (q: string, spaceId?: string) => ['search', q, spaceId ?? ''] as const,
 }
 
-type Pages = InfiniteData<Message[], string | undefined>
+export type Pages = InfiniteData<Message[], string | undefined>
 
 const byNewest = (a: Message, b: Message) => b.createTime.localeCompare(a.createTime)
 
 const sameMessage = (a: Message, b: Message) =>
   a.googleName === b.googleName ||
+  a.id === b.id ||
   (!!a.clientAssignedMessageId && a.clientAssignedMessageId === b.clientAssignedMessageId)
 
 /** Insert or replace messages in a newest-first list (matches optimistic copies by client id). */
@@ -59,6 +73,10 @@ export function markFailed(qc: QueryClient, spaceId: string, clientId: string) {
 
 export function setSpaceRead(qc: QueryClient, spaceId: string, lastReadTime: string) {
   qc.setQueryData<Space[]>(keys.spaces, (list) =>
-    list?.map((s) => (s.id === spaceId ? { ...s, unreadCount: 0, lastReadTime } : s)),
+    list?.map((s) => (s.id === spaceId ? { ...s, unreadCount: 0, mentionCount: 0, lastReadTime } : s)),
   )
+}
+
+export function findLoadedMessage(qc: QueryClient, spaceId: string, pred: (m: Message) => boolean): Message | undefined {
+  return qc.getQueryData<Pages>(keys.messages(spaceId))?.pages.flat().find(pred)
 }

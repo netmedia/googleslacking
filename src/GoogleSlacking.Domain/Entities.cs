@@ -22,6 +22,10 @@ public class Tenant
     public string? GoogleCustomerId { get; set; }
 
     public bool IsActive { get; set; } = true;
+
+    /// <summary>Company-wide switch: when false nobody in this tenant can share or see read receipts.</summary>
+    public bool ReadReceiptsEnabled { get; set; } = true;
+
     public DateTimeOffset CreatedAt { get; set; }
 }
 
@@ -100,6 +104,11 @@ public class SpaceMember : ITenantOwned
     public DateTimeOffset? LastReadTime { get; set; }
     public bool IsMuted { get; set; }
     public bool IsStarred { get; set; }
+    public NotifyLevel NotifyLevel { get; set; }
+
+    /// <summary>Custom sidebar section (null = default grouping).</summary>
+    public Guid? SectionId { get; set; }
+    public int SortOrder { get; set; }
 }
 
 public class Message : ITenantOwned
@@ -122,6 +131,10 @@ public class Message : ITenantOwned
     /// <summary>Reaction summaries / attachments / annotations as received from Google (JSON).</summary>
     public string? ReactionsJson { get; set; }
     public string? AttachmentsJson { get; set; }
+    public string? AnnotationsJson { get; set; }
+
+    /// <summary>Space-delimited mentioned users, e.g. " users/1 users/all " (cheap LIKE lookups).</summary>
+    public string? MentionedUserNames { get; set; }
 
     public DateTimeOffset CreateTime { get; set; }
     public DateTimeOffset? LastUpdateTime { get; set; }

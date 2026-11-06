@@ -5,11 +5,13 @@ interface Props {
   spaces: Space[]
   onSelect: (id: string) => void
   onClose: () => void
+  placeholder?: string
+  title?: string
 }
 
 const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').toLowerCase()
 
-export function QuickSwitcher({ spaces, onSelect, onClose }: Props) {
+export function QuickSwitcher({ spaces, onSelect, onClose, placeholder = 'Idi na razgovor…', title }: Props) {
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState(0)
 
@@ -17,7 +19,7 @@ export function QuickSwitcher({ spaces, onSelect, onClose }: Props) {
     const q = norm(query.trim())
     const list = q ? spaces.filter((s) => norm(s.displayName).includes(q)) : spaces
     // Unread first, then most recent (spaces already come sorted by activity).
-    return [...list].sort((a, b) => Number(b.unreadCount > 0) - Number(a.unreadCount > 0)).slice(0, 12)
+    return [...list].sort((a, b) => Number(b.mentionCount > 0) - Number(a.mentionCount > 0) || Number(b.unreadCount > 0) - Number(a.unreadCount > 0)).slice(0, 12)
   }, [query, spaces])
 
   const onKeyDown = (e: KeyboardEvent) => {
@@ -34,9 +36,10 @@ export function QuickSwitcher({ spaces, onSelect, onClose }: Props) {
   return (
     <div className="overlay" onMouseDown={onClose}>
       <div className="switcher" onMouseDown={(e) => e.stopPropagation()}>
+        {title && <div className="switcher-title">{title}</div>}
         <input
           autoFocus
-          placeholder="Idi na razgovor…"
+          placeholder={placeholder}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value)
@@ -49,7 +52,7 @@ export function QuickSwitcher({ spaces, onSelect, onClose }: Props) {
             <li key={s.id} className={i === index ? 'selected' : ''} onMouseEnter={() => setIndex(i)} onClick={() => onSelect(s.id)}>
               <span className="glyph">{s.kind === 0 ? '#' : '●'}</span>
               <span className="name">{s.displayName}</span>
-              {s.unreadCount > 0 && <span className="badge">{s.unreadCount}</span>}
+              {s.mentionCount > 0 ? <span className="badge">@{s.mentionCount}</span> : s.unreadCount > 0 && <span className="badge">{s.unreadCount}</span>}
             </li>
           ))}
         </ul>

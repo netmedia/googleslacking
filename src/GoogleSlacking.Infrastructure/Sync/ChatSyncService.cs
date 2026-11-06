@@ -1,5 +1,7 @@
+using GoogleSlacking.Core.Rules;
 using GoogleSlacking.Domain;
 using GoogleSlacking.Google;
+using GoogleSlacking.Infrastructure.Notifications;
 using GoogleSlacking.Infrastructure.Auth;
 using GoogleSlacking.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -19,6 +21,7 @@ public sealed class ChatSyncService(
     WorkspaceEventsClient events,
     UserTokenService tokens,
     IRealtimeNotifier notifier,
+    NotificationService notifications,
     IOptions<GoogleOptions> options,
     TimeProvider clock,
     ILogger<ChatSyncService> log)
@@ -75,8 +78,8 @@ public sealed class ChatSyncService(
         // 3. Names/avatars for everyone we've seen
         await ResolvePeopleAsync(token, ct);
 
-        // 4. Real-time subscription
-        await EnsureSubscriptionAsync(user, token, ct);
+        // 4. Real-time subscriptions
+        await EnsureSubscriptionsAsync(user, token, ct);
 
         user.InitialSyncCompletedAt = clock.GetUtcNow();
         await db.SaveChangesAsync(ct);
@@ -164,6 +167,7 @@ public sealed class ChatSyncService(
         var existing = await db.Messages.Where(m => names.Contains(m.GoogleName)).ToDictionaryAsync(m => m.GoogleName, ct);
 
         var changed = new List<Message>();
+        var created = new List<Message>();
         foreach (var r in complete)
         {
             if (!spaces.TryGetValue(r.SpaceName, out var space))
@@ -190,6 +194,7 @@ public sealed class ChatSyncService(
                 };
                 db.Messages.Add(m);
                 existing[r.Name] = m;
+                created.Add(m);
             }
 
             m.ThreadName = r.Thread?.Name;
@@ -198,6 +203,8 @@ public sealed class ChatSyncService(
             m.FormattedText = r.FormattedText;
             m.ReactionsJson = JsonHelpers.ToJson(r.EmojiReactionSummaries);
             m.AttachmentsJson = JsonHelpers.ToJson(r.Attachment);
+            m.AnnotationsJson = JsonHelpers.ToJson(r.Annotations);
+            m.MentionedUserNames = Mentions.ToStorage(Mentions.FromAnnotations(r.Annotations));
             m.CreateTime = r.CreateTime!.Value;
             m.LastUpdateTime = r.LastUpdateTime;
             m.DeleteTime = r.DeleteTime;
@@ -208,9 +215,48 @@ public sealed class ChatSyncService(
         }
 
         await db.SaveChangesAsync(ct);
-        if (notify) await NotifyAsync(changed, ct);
+        if (notify)
+        {
+            await NotifyAsync(changed, ct);
+            await notifications.OnMessagesCreatedAsync(created, ct);
+        }
         return changed;
     }
+
+    /// <summary>
+    /// Stores/removes an individual reaction (who reacted). Returns the affected message, if we have it.
+    /// Idempotent: the same reaction event arrives once per subscribed member.
+    /// </summary>
+    public async Task<Message?> ApplyReactionAsync(ChatReaction reaction, bool removed, CancellationToken ct)
+    {
+        var msg = await db.Messages.FirstOrDefaultAsync(m => m.GoogleName == reaction.MessageName, ct);
+        if (msg is null) return null;
+
+        var existing = await db.Reactions.FirstOrDefaultAsync(r => r.GoogleName == reaction.Name, ct);
+        if (removed)
+        {
+            if (existing is not null) db.Reactions.Remove(existing);
+        }
+        else if (existing is null && reaction.User?.Name is { } user && reaction.Emoji is { } emoji)
+        {
+            var added = new MessageReaction
+            {
+                Id = Guid.NewGuid(),
+                MessageId = msg.Id,
+                GoogleName = reaction.Name,
+                UserGoogleName = user,
+                Emoji = emoji.Key,
+            };
+            db.Reactions.Add(added);
+            await db.SaveChangesAsync(ct);
+            await notifications.OnReactionAddedAsync(added, ct);
+        }
+        await db.SaveChangesAsync(ct);
+        return msg;
+    }
+
+    /// <summary>Broadcasts the current state of these messages to everyone in their spaces.</summary>
+    public Task NotifyMessagesAsync(IReadOnlyCollection<Message> messages, CancellationToken ct) => NotifyAsync(messages, ct);
 
     public async Task MarkDeletedAsync(IReadOnlyCollection<string> messageNames, CancellationToken ct)
     {
@@ -221,7 +267,7 @@ public sealed class ChatSyncService(
     }
 
     /// <summary>Re-fetches one space after a space/membership event.</summary>
-    public async Task RefreshSpaceAsync(Guid userId, string spaceName, CancellationToken ct)
+    public async Task RefreshSpaceAsync(Guid userId, string spaceName, CancellationToken ct, bool includeMembers = false)
     {
         var user = await db.Users.SingleAsync(u => u.Id == userId, ct);
         var token = await tokens.GetAccessTokenAsync(db, userId, ct);
@@ -232,7 +278,7 @@ public sealed class ChatSyncService(
             var spaces = await UpsertSpacesAsync([remote], ct);
             var space = spaces[spaceName];
             await EnsureMemberAsync(space, user.GoogleUserName, user.Id, ct);
-            if (space.Kind != SpaceKind.Space) await SyncMembersAsync(token, space, ct);
+            if (includeMembers || space.Kind != SpaceKind.Space) await SyncMembersAsync(token, space, ct);
             await db.SaveChangesAsync(ct);
             await ResolvePeopleAsync(token, ct);
         }
@@ -289,12 +335,29 @@ public sealed class ChatSyncService(
         }
     }
 
-    /// <summary>Makes sure the user has an active "all my spaces" subscription.</summary>
-    public async Task EnsureSubscriptionAsync(AppUser user, string token, CancellationToken ct)
+    /// <summary>
+    /// Makes sure the user has both subscriptions: "all my spaces" (messages, reactions, memberships)
+    /// and the per-user one (read state from other clients).
+    /// </summary>
+    public async Task EnsureSubscriptionsAsync(AppUser user, string token, CancellationToken ct)
+    {
+        await EnsureSubscriptionAsync(user, token, ChatEventTypes.AllSpacesTarget, ChatEventTypes.AllSpacesSubscription, ct);
+        try
+        {
+            await EnsureSubscriptionAsync(user, token, ChatEventTypes.UserTarget(user.GoogleUserName), ChatEventTypes.UserSubscription, ct);
+        }
+        catch (GoogleApiException ex)
+        {
+            // Not fatal: unread state just won't follow the official clients.
+            log.LogWarning(ex, "User subscription failed for {Email}", user.Email);
+        }
+    }
+
+    private async Task EnsureSubscriptionAsync(AppUser user, string token, string target, string[] eventTypes, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
         var sub = await db.EventSubscriptions
-            .Where(s => s.AppUserId == user.Id && s.TargetResource == ChatEventTypes.AllSpacesTarget && s.State != SubscriptionState.Deleted)
+            .Where(s => s.AppUserId == user.Id && s.TargetResource == target && s.State != SubscriptionState.Deleted)
             .OrderByDescending(s => s.UpdatedAt)
             .FirstOrDefaultAsync(ct);
 
@@ -323,13 +386,13 @@ public sealed class ChatSyncService(
         {
             try
             {
-                remote = await events.CreateSubscriptionAsync(token, ChatEventTypes.AllSpacesTarget,
-                    ChatEventTypes.AllSpacesSubscription, options.Value.TopicResourceName, includeResource: true, ct);
+                remote = await events.CreateSubscriptionAsync(token, target, eventTypes, options.Value.TopicResourceName,
+                    includeResource: true, ct);
             }
             catch (GoogleApiException ex) when (ex.Status == System.Net.HttpStatusCode.Conflict)
             {
                 // Already exists (e.g. DB was reset): adopt it.
-                var list = await events.ListSubscriptionsAsync(token, ChatEventTypes.AllSpacesTarget, ChatEventTypes.MessageCreated, ct);
+                var list = await events.ListSubscriptionsAsync(token, target, eventTypes[0], ct);
                 remote = list.FirstOrDefault();
                 if (remote?.Name is { } n) await events.RenewAsync(token, n, ct);
             }
@@ -337,7 +400,7 @@ public sealed class ChatSyncService(
 
         if (remote?.Name is null)
         {
-            log.LogError("Could not obtain an events subscription for {Email}", user.Email);
+            log.LogError("Could not obtain an events subscription ({Target}) for {Email}", target, user.Email);
             return;
         }
 
@@ -353,7 +416,7 @@ public sealed class ChatSyncService(
                     TenantId = user.TenantId,
                     AppUserId = user.Id,
                     GoogleName = remote.Name,
-                    TargetResource = ChatEventTypes.AllSpacesTarget,
+                    TargetResource = target,
                 };
                 db.EventSubscriptions.Add(sub);
             }
@@ -368,7 +431,7 @@ public sealed class ChatSyncService(
         sub.ExpireTime = remote.ExpireTime;
         sub.UpdatedAt = now;
         await db.SaveChangesAsync(ct);
-        log.LogInformation("Subscription {Name} for {Email} active until {Expire}", sub.GoogleName, user.Email, sub.ExpireTime);
+        log.LogInformation("Subscription {Name} ({Target}) for {Email} active until {Expire}", sub.GoogleName, target, user.Email, sub.ExpireTime);
     }
 
     private async Task NotifyAsync(IReadOnlyCollection<Message> changed, CancellationToken ct)

@@ -17,6 +17,10 @@ public static class ChatEventTypes
     public const string SpaceUpdated = "google.workspace.chat.space.v1.updated";
     public const string SpaceDeleted = "google.workspace.chat.space.v1.deleted";
 
+    public const string MembershipUpdated = "google.workspace.chat.membership.v1.updated";
+    public const string SpaceReadStateUpdated = "google.workspace.chat.spaceReadState.v1.updated";
+    public const string ThreadReadStateUpdated = "google.workspace.chat.threadReadState.v1.updated";
+
     // Subscription lifecycle events (always delivered, no need to subscribe).
     public const string SubscriptionExpirationReminder = "google.workspace.events.subscription.v1.expirationReminder";
     public const string SubscriptionSuspended = "google.workspace.events.subscription.v1.suspended";
@@ -33,6 +37,12 @@ public static class ChatEventTypes
 
     /// <summary>Target resource meaning "every space the authorizing user is a member of".</summary>
     public const string AllSpacesTarget = "//chat.googleapis.com/spaces/-";
+
+    /// <summary>Per-user subscription: read state from other clients (official Google Chat apps).</summary>
+    public static readonly string[] UserSubscription = [SpaceReadStateUpdated];
+
+    /// <summary>"users/123" -> "//cloudidentity.googleapis.com/users/123"</summary>
+    public static string UserTarget(string googleUserName) => "//cloudidentity.googleapis.com/" + googleUserName;
 }
 
 public sealed record WorkspaceSubscription

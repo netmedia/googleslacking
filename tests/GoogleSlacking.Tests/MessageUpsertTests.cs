@@ -3,6 +3,8 @@ using GoogleSlacking.Google;
 using GoogleSlacking.Infrastructure;
 using GoogleSlacking.Infrastructure.Auth;
 using GoogleSlacking.Infrastructure.Data;
+using GoogleSlacking.Infrastructure.Notifications;
+using GoogleSlacking.Core.WebPush;
 using GoogleSlacking.Infrastructure.Sync;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
@@ -23,6 +25,8 @@ public class MessageUpsertTests
         }
         public Task SpaceChangedAsync(Guid tenantId, Guid spaceId, CancellationToken ct) => Task.CompletedTask;
         public Task SpacesListChangedAsync(Guid tenantId, Guid appUserId, CancellationToken ct) => Task.CompletedTask;
+        public Task ToUserAsync(Guid appUserId, string eventName, object? payload, CancellationToken ct) => Task.CompletedTask;
+        public Task ToSpaceAsync(Guid spaceId, string eventName, object? payload, CancellationToken ct) => Task.CompletedTask;
     }
 
     private static ChatSyncService Create(AppDbContext db, IRealtimeNotifier notifier)
@@ -31,8 +35,11 @@ public class MessageUpsertTests
         var opts = Options.Create(new GoogleOptions());
         var tokens = new UserTokenService(new EphemeralDataProtectionProvider(), new GoogleOAuthClient(http, opts),
             TimeProvider.System, NullLogger<UserTokenService>.Instance);
+        var notifications = new NotificationService(db, notifier, new NullPresence(),
+            new WebPushSender(http, Options.Create(new WebPushOptions()), TimeProvider.System),
+            TimeProvider.System, NullLogger<NotificationService>.Instance);
         return new ChatSyncService(db, new ChatApiClient(http), new PeopleApiClient(http), new WorkspaceEventsClient(http),
-            tokens, notifier, opts, TimeProvider.System, NullLogger<ChatSyncService>.Instance);
+            tokens, notifier, notifications, opts, TimeProvider.System, NullLogger<ChatSyncService>.Instance);
     }
 
     private static ChatMessage Msg(string text, DateTimeOffset? updated = null) => new()

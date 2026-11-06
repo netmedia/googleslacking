@@ -15,7 +15,8 @@ gcloud services enable chat.googleapis.com workspaceevents.googleapis.com pubsub
 - **User type:**
   - *Internal*: Netmedia only, or self-hosted at a customer. No verification needed.
   - *External*: when other organisations should use Netmedia's hosted instance. Their admin marks the app as **Trusted**, so it counts as internal for them: no 100-user cap and refresh tokens don't expire after 7 days. Don't start verification unless you want to offer it publicly; `chat.messages` is a *restricted* scope (requires a CASA assessment).
-- Scopes: `openid`, `email`, `profile`, `chat.spaces.readonly`, `chat.messages`, `chat.messages.reactions`, `chat.memberships.readonly`, `chat.users.readstate`, `directory.readonly`.
+- Scopes: `openid`, `email`, `profile`, `chat.spaces.readonly`, `chat.spaces.create`, `chat.messages`, `chat.messages.reactions`, `chat.memberships`, `chat.users.readstate`, `directory.readonly`.
+- When the scopes change, users must sign in again (the app always asks for consent at sign-in, so it's enough to sign out and back in).
 
 ## 3. OAuth client (Web application)
 
@@ -60,3 +61,16 @@ Recommended: a dead-letter topic on `chat-events-backend` (max 5 deliveries).
 Admin console → Security → Access and data control → **API controls** → Manage third-party app access → *Add app* → OAuth App Name or Client ID → enter the client ID → **Trusted**.
 
 Then add the tenant to the `Tenants` table (Name, Domain = the primary Workspace domain).
+
+## 7. Web Push (VAPID)
+
+Push notifications in the browser and the installed PWA don't go through Google; we send them ourselves (RFC 8030/8291) using a VAPID key pair:
+
+```powershell
+cd src/GoogleSlacking.Api
+dotnet run -- --generate-vapid   # prints the 3 user-secrets commands (Push:VapidPublicKey, Push:VapidPrivateKey, Push:Subject)
+```
+
+- One key pair per deployment. If you change it, all existing subscriptions stop working (users re-enable push in Settings).
+- In production: Key Vault / app settings `Push__VapidPublicKey`, `Push__VapidPrivateKey`, `Push__Subject`.
+- iPhone/iPad: push works only for the PWA added to the home screen (iOS 16.4+).

@@ -1,4 +1,8 @@
+using GoogleSlacking.Core.Unfurl;
+using GoogleSlacking.Core.WebPush;
 using GoogleSlacking.Google;
+using GoogleSlacking.Infrastructure.Notifications;
+using GoogleSlacking.Infrastructure.Search;
 using GoogleSlacking.Infrastructure.Auth;
 using GoogleSlacking.Infrastructure.Data;
 using GoogleSlacking.Infrastructure.Sync;
@@ -31,12 +35,25 @@ public static class DependencyInjection
         services.AddScoped<ChatSyncService>();
         services.AddScoped<ChatQueries>();
         services.AddScoped<EventProcessor>();
+        services.AddScoped<NotificationService>();
+        services.AddScoped<SearchService>();
+        services.AddScoped<ReadReceipts.ReadReceiptService>();
         services.TryAddSingleton<IRealtimeNotifier, NullRealtimeNotifier>();
+        services.TryAddSingleton<IPresence, NullPresence>();
+
+        services.Configure<WebPushOptions>(config.GetSection(WebPushOptions.Section));
+        services.AddHttpClient<WebPushSender>(c => c.Timeout = TimeSpan.FromSeconds(15));
+
+        services.AddMemoryCache();
+        services.AddHttpClient(LinkPreviewService.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(6))
+            .ConfigurePrimaryHttpMessageHandler(LinkPreviewService.CreateHandler);
+        services.AddSingleton<LinkPreviewService>();
 
         services.AddSingleton<InitialSyncQueue>();
         services.AddHostedService<InitialSyncWorker>();
         services.AddHostedService<PubSubPullWorker>();
         services.AddHostedService<SubscriptionMaintenanceWorker>();
+        services.AddHostedService<TimersWorker>();
         return services;
     }
 }

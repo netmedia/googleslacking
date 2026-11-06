@@ -20,4 +20,7 @@ Google Chat client in the style of Slack. .NET 10 backend (BFF + sync) and React
 - **Google API calls only through `GoogleSlacking.Google` clients** (retry/backoff on 429). Read endpoints don't call Google, except the `BackfillOlderAsync` fallback.
 - Event processing must be **idempotent**: the same event arrives once for each subscribed member.
 - Chat API with user auth doesn't return sender names; use `Person` / `ResolvePeopleAsync`.
+- Pure logic (rules, parsers, crypto) goes in `GoogleSlacking.Core` — no NuGet packages there, so it stays easily testable.
+- Notification decisions only through `NotificationRules.Decide`; add a test to `NotificationRulesTests` when you change it.
+- React: an effect must not return anything except a cleanup function (e.g. `scrollIntoView` returns a Promise in newer Chromium) — use `{ }` bodies.
 - UI text is in Croatian.

@@ -42,6 +42,7 @@ public sealed record ChatMessage
     public string? ClientAssignedMessageId { get; init; }
     public JsonElement? EmojiReactionSummaries { get; init; }
     public JsonElement? Attachment { get; init; }
+    public JsonElement? Annotations { get; init; }
 
     /// <summary>"spaces/X/messages/Y" -> "spaces/X"</summary>
     [JsonIgnore]
@@ -71,3 +72,39 @@ public sealed record SpaceReadState
 public sealed record ListSpacesResponse(List<ChatSpace>? Spaces, string? NextPageToken);
 public sealed record ListMessagesResponse(List<ChatMessage>? Messages, string? NextPageToken);
 public sealed record ListMembershipsResponse(List<ChatMembership>? Memberships, string? NextPageToken);
+
+public sealed record ChatEmoji
+{
+    public string? Unicode { get; init; }
+    public ChatCustomEmoji? CustomEmoji { get; init; }
+
+    /// <summary>Storage/display key: the unicode emoji, or "custom:{uid}".</summary>
+    [JsonIgnore]
+    public string Key => Unicode ?? (CustomEmoji?.Uid is { } uid ? "custom:" + uid : "?");
+}
+
+public sealed record ChatCustomEmoji
+{
+    public string? Uid { get; init; }
+    public string? EmojiName { get; init; }
+}
+
+public sealed record ChatReaction
+{
+    public string Name { get; init; } = "";
+    public ChatUser? User { get; init; }
+    public ChatEmoji? Emoji { get; init; }
+
+    /// <summary>"spaces/X/messages/Y/reactions/Z" -> "spaces/X/messages/Y"</summary>
+    [JsonIgnore]
+    public string MessageName
+    {
+        get
+        {
+            var i = Name.IndexOf("/reactions/", StringComparison.Ordinal);
+            return i > 0 ? Name[..i] : Name;
+        }
+    }
+}
+
+public sealed record ListReactionsResponse(List<ChatReaction>? Reactions, string? NextPageToken);

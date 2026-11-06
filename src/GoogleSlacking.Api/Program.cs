@@ -7,13 +7,27 @@ using GoogleSlacking.Infrastructure.Auth;
 using GoogleSlacking.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
+if (args.Contains("--generate-vapid"))
+{
+    var keys = GoogleSlacking.Core.WebPush.VapidKeys.Generate();
+    Console.WriteLine("Add these to user secrets (the private key is a secret!):");
+    Console.WriteLine($"  dotnet user-secrets set \"Push:VapidPublicKey\" \"{keys.PublicKey}\"");
+    Console.WriteLine($"  dotnet user-secrets set \"Push:VapidPrivateKey\" \"{keys.PrivateKey}\"");
+    Console.WriteLine("  dotnet user-secrets set \"Push:Subject\" \"mailto:you@yourcompany.com\"");
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Layered config: appsettings -> appsettings.{Env} -> user secrets (dev, shared solution ID) -> env vars
 // -> appsettings.Local.json (gitignored, last so it's easy to override locally).
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
 
-builder.Services.AddSingleton<IRealtimeNotifier, SignalRNotifier>(); // before AddInfrastructure (it TryAdds a null notifier)
+// Before AddInfrastructure (it TryAdds null implementations).
+builder.Services.AddSingleton<IRealtimeNotifier, SignalRNotifier>();
+builder.Services.AddSingleton<PresenceTracker>();
+builder.Services.AddSingleton<IPresence>(sp => sp.GetRequiredService<PresenceTracker>());
+builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o => o.MultipartBodyLengthLimit = MessageEndpoints.MaxUploadBytes + 1024 * 1024);
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddGoogleSignIn(builder.Configuration);
 builder.Services.AddSignalR();
@@ -49,6 +63,9 @@ app.UseAuthorization();
 
 app.MapAuthEndpoints();
 app.MapChatEndpoints();
+app.MapMessageEndpoints();
+app.MapUserEndpoints();
+app.MapLaterEndpoints();
 app.MapHub<ChatHub>("/hubs/chat");
 app.MapGet("/healthz", () => Results.Ok("ok"));
 app.MapFallbackToFile("index.html"); // SPA (built into wwwroot in production)
@@ -79,6 +96,7 @@ internal static class DevSetup
                 Id = Guid.NewGuid(),
                 Name = t["Name"] ?? domain,
                 Domain = domain,
+                ReadReceiptsEnabled = !string.Equals(t["ReadReceipts"], "false", StringComparison.OrdinalIgnoreCase),
                 CreatedAt = DateTimeOffset.UtcNow,
             });
         }

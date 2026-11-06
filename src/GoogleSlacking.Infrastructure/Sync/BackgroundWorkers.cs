@@ -153,11 +153,11 @@ public sealed class SubscriptionMaintenanceWorker(
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var limit = clock.GetUtcNow().Add(RenewWindow);
 
-            // Users with a refresh token whose subscription is missing, expiring, expired or suspended.
+            // Users with a refresh token where one of the two subscriptions is missing, expiring, expired or suspended.
             var rows = await db.Users.IgnoreQueryFilters()
                 .Where(u => u.ProtectedRefreshToken != null && u.InitialSyncCompletedAt != null)
-                .Where(u => !db.EventSubscriptions.IgnoreQueryFilters().Any(s =>
-                    s.AppUserId == u.Id && s.State == SubscriptionState.Active && s.ExpireTime > limit))
+                .Where(u => db.EventSubscriptions.IgnoreQueryFilters().Count(s =>
+                    s.AppUserId == u.Id && s.State == SubscriptionState.Active && s.ExpireTime > limit) < 2)
                 .Select(u => new { u.TenantId, u.Id })
                 .ToListAsync(ct);
             due = rows.Select(x => (x.TenantId, UserId: x.Id)).ToList();
@@ -173,7 +173,7 @@ public sealed class SubscriptionMaintenanceWorker(
                 var tokens = scope.ServiceProvider.GetRequiredService<UserTokenService>();
                 var user = await db.Users.SingleAsync(u => u.Id == userId, ct);
                 await scope.ServiceProvider.GetRequiredService<ChatSyncService>()
-                    .EnsureSubscriptionAsync(user, await tokens.GetAccessTokenAsync(db, userId, ct), ct);
+                    .EnsureSubscriptionsAsync(user, await tokens.GetAccessTokenAsync(db, userId, ct), ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

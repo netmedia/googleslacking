@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="..\GoogleSlacking.Domain\GoogleSlacking.Domain.csproj" />
     <ProjectReference Include="..\GoogleSlacking.Google\GoogleSlacking.Google.csproj" />
+    <ProjectReference Include="..\GoogleSlacking.Core\GoogleSlacking.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="GoogleSlacking.Tests" />

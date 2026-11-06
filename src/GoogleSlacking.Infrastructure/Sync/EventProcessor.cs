@@ -15,10 +15,13 @@ public sealed class EventProcessor(
     ChatSyncService sync,
     ChatApiClient chat,
     UserTokenService tokens,
+    IRealtimeNotifier notifier,
+    ReadReceipts.ReadReceiptService receipts,
     ILogger<EventProcessor> log)
 {
     public async Task HandleAsync(WorkspaceEvent e, CancellationToken ct)
     {
+        // Cross-tenant lookup on purpose: the subscription tells us which tenant this event belongs to.
         var sub = await db.EventSubscriptions.IgnoreQueryFilters()
             .FirstOrDefaultAsync(s => s.GoogleName == e.SubscriptionName, ct);
         if (sub is null)
@@ -47,12 +50,36 @@ public sealed class EventProcessor(
                 break;
 
             case ChatEventTypes.ReactionCreated or ChatEventTypes.ReactionDeleted:
-                if (WorkspaceEventParser.ExtractReactionMessageName(e) is { } msgName
-                    && await FetchMessageAsync(sub.AppUserId, msgName, ct) is { } fresh)
-                    await sync.UpsertMessagesAsync([fresh], notify: true, ct);
-                break;
+            {
+                var reaction = WorkspaceEventParser.ExtractReaction(e);
+                if (reaction is null) break;
+                var local = await sync.ApplyReactionAsync(reaction, removed: e.Type == ChatEventTypes.ReactionDeleted, ct);
 
-            case ChatEventTypes.MembershipCreated or ChatEventTypes.MembershipDeleted
+                // Refresh the summary counts from Google, then broadcast (even if the summary didn't change,
+                // the list of who reacted did).
+                if (await FetchMessageAsync(sub.AppUserId, reaction.MessageName, ct) is { } fresh)
+                {
+                    var changed = await sync.UpsertMessagesAsync([fresh], notify: false, ct);
+                    var target = changed.FirstOrDefault() ?? local;
+                    if (target is not null) await sync.NotifyMessagesAsync([target], ct);
+                }
+                break;
+            }
+
+            case ChatEventTypes.SpaceReadStateUpdated:
+            {
+                if (WorkspaceEventParser.ExtractSpaceReadState(e) is not { } rs || rs.LastReadTime is not { } last) break;
+                var member = await db.SpaceMembers.Include(m => m.Space)
+                    .FirstOrDefaultAsync(m => m.AppUserId == sub.AppUserId && m.Space!.GoogleName == rs.SpaceName, ct);
+                if (member is null || member.LastReadTime >= last) break;
+                member.LastReadTime = last;
+                await db.SaveChangesAsync(ct);
+                await notifier.SpacesListChangedAsync(sub.TenantId, sub.AppUserId, ct);
+                await receipts.OnReadAsync(sub.AppUserId, [member.SpaceId], ct); // read in an official client
+                break;
+            }
+
+            case ChatEventTypes.MembershipCreated or ChatEventTypes.MembershipUpdated or ChatEventTypes.MembershipDeleted
                 or ChatEventTypes.SpaceUpdated or ChatEventTypes.SpaceDeleted:
                 if ((WorkspaceEventParser.SubjectSpaceName(e) ?? SpaceFromData(e)) is { } spaceName)
                     await sync.RefreshSpaceAsync(sub.AppUserId, spaceName, ct);
@@ -69,7 +96,7 @@ public sealed class EventProcessor(
                 };
                 await db.SaveChangesAsync(ct);
                 var user = await db.Users.SingleAsync(u => u.Id == sub.AppUserId, ct);
-                await sync.EnsureSubscriptionAsync(user, await tokens.GetAccessTokenAsync(db, user.Id, ct), ct);
+                await sync.EnsureSubscriptionsAsync(user, await tokens.GetAccessTokenAsync(db, user.Id, ct), ct);
                 break;
 
             default:

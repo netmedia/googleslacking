@@ -31,6 +31,8 @@ public sealed class GoogleOptions
 public static class GoogleScopes
 {
     public const string ChatSpacesReadonly = "https://www.googleapis.com/auth/chat.spaces.readonly";
+    public const string ChatSpacesCreate = "https://www.googleapis.com/auth/chat.spaces.create";
+    public const string ChatMemberships = "https://www.googleapis.com/auth/chat.memberships";
     public const string ChatMessages = "https://www.googleapis.com/auth/chat.messages";          // restricted
     public const string ChatMessagesReactions = "https://www.googleapis.com/auth/chat.messages.reactions";
     public const string ChatMembershipsReadonly = "https://www.googleapis.com/auth/chat.memberships.readonly";
@@ -42,9 +44,10 @@ public static class GoogleScopes
     public static readonly string[] UserScopes =
     [
         ChatSpacesReadonly,
+        ChatSpacesCreate,
         ChatMessages,
         ChatMessagesReactions,
-        ChatMembershipsReadonly,
+        ChatMemberships,
         ChatUsersReadState,
         DirectoryReadonly,
     ];

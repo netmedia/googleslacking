@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Pure logic + small protocol implementations (Web Push, link previews, notification rules, search syntax).
+       No NuGet packages on purpose: easy to test and to reason about. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GoogleSlacking.Domain\GoogleSlacking.Domain.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="GoogleSlacking.Tests" />
+  </ItemGroup>
+</Project>

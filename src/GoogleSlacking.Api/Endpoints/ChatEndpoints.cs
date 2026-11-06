@@ -1,3 +1,4 @@
+using System.Text.Json;
 using GoogleSlacking.Api.Auth;
 using GoogleSlacking.Google;
 using GoogleSlacking.Infrastructure;
@@ -10,7 +11,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GoogleSlacking.Api.Endpoints;
 
-public sealed record SendMessageRequest(string Text, string? ThreadName, string ClientMessageId);
+public sealed record SendMessageRequest(string Text, string? ThreadName, string ClientMessageId, List<JsonElement>? Attachments);
 public sealed record MarkReadRequest(DateTimeOffset LastReadTime);
 public sealed record MeDto(Guid Id, string GoogleUserName, string Email, string? DisplayName, string? AvatarUrl, bool SyncCompleted);
 
@@ -47,12 +48,15 @@ public static class ChatEndpoints
             q.GetSpacesAsync(ctx.User.UserId(), ct));
 
         api.MapGet("/spaces/{spaceId:guid}/messages", async (
-            Guid spaceId, DateTimeOffset? before, int? limit, string? thread,
+            Guid spaceId, DateTimeOffset? before, DateTimeOffset? around, int? limit, string? thread,
             HttpContext ctx, AppDbContext db, ChatQueries q, ChatSyncService sync, CancellationToken ct) =>
         {
             var userId = ctx.User.UserId();
             if (!await q.IsMemberAsync(userId, spaceId, ct)) return Results.NotFound();
             var take = Math.Clamp(limit ?? 50, 1, 200);
+
+            if (around is { } at)
+                return Results.Ok(await q.GetMessagesAroundAsync(spaceId, at, take / 2, ct));
 
             var page = await q.GetMessagesAsync(spaceId, before, take, thread, ct);
             if (page.Count < take && thread is null)
@@ -73,13 +77,14 @@ public static class ChatEndpoints
         {
             var userId = ctx.User.UserId();
             if (!await q.IsMemberAsync(userId, spaceId, ct)) return Results.NotFound();
-            if (string.IsNullOrWhiteSpace(body.Text)) return Results.BadRequest("Text is required.");
+            if (string.IsNullOrWhiteSpace(body.Text) && body.Attachments is not { Count: > 0 }) return Results.BadRequest("Text is required.");
             if (!body.ClientMessageId.StartsWith("client-", StringComparison.Ordinal) || body.ClientMessageId.Length > 63)
                 return Results.BadRequest("ClientMessageId must start with 'client-' and be at most 63 chars.");
 
             var space = await db.Spaces.SingleAsync(s => s.Id == spaceId, ct);
             var token = await tokens.GetAccessTokenAsync(db, userId, ct);
-            var sent = await chat.CreateMessageAsync(token, space.GoogleName, body.Text, body.ThreadName, body.ClientMessageId, ct);
+            var sent = await chat.CreateMessageAsync(token, space.GoogleName, body.Text ?? "", body.ThreadName, body.ClientMessageId,
+                body.Attachments, ct);
             if (sent is null) return Results.StatusCode(502);
 
             // Upsert + broadcast now (other tabs/devices); the Pub/Sub echo is deduplicated.
@@ -90,7 +95,7 @@ public static class ChatEndpoints
         api.MapPost("/spaces/{spaceId:guid}/read", async (
             Guid spaceId, MarkReadRequest body,
             HttpContext ctx, AppDbContext db, ChatApiClient chat, UserTokenService tokens,
-            IRealtimeNotifier notifier, CancellationToken ct) =>
+            IRealtimeNotifier notifier, GoogleSlacking.Infrastructure.ReadReceipts.ReadReceiptService receipts, CancellationToken ct) =>
         {
             var userId = ctx.User.UserId();
             var member = await db.SpaceMembers.Include(m => m.Space)
@@ -101,6 +106,7 @@ public static class ChatEndpoints
             member.LastReadTime = body.LastReadTime;
             await db.SaveChangesAsync(ct);
             await notifier.SpacesListChangedAsync(ctx.User.TenantId(), userId, ct);
+            await receipts.OnReadAsync(userId, [spaceId], ct);
 
             // Keep the official Google Chat clients in sync too.
             var token = await tokens.GetAccessTokenAsync(db, userId, ct);

@@ -58,6 +58,26 @@ public static class WorkspaceEventParser
         return i > 0 ? name![..i] : null;
     }
 
+    /// <summary>Reaction resource from reaction events (name always; user/emoji when resource data is included).</summary>
+    public static ChatReaction? ExtractReaction(WorkspaceEvent e) =>
+        e.Data is { ValueKind: JsonValueKind.Object } d && d.TryGetProperty("reaction", out var r)
+            ? r.Deserialize<ChatReaction>(GoogleHttp.Json)
+            : null;
+
+    /// <summary>
+    /// Space read state from a user subscription: "users/U/spaces/S/spaceReadState" -> ("spaces/S", lastReadTime).
+    /// </summary>
+    public static (string SpaceName, DateTimeOffset? LastReadTime)? ExtractSpaceReadState(WorkspaceEvent e)
+    {
+        if (e.Data is not { ValueKind: JsonValueKind.Object } d || !d.TryGetProperty("spaceReadState", out var rs)) return null;
+        if (!rs.TryGetProperty("name", out var n) || n.GetString() is not { } name) return null;
+        var i = name.IndexOf("spaces/", StringComparison.Ordinal);
+        if (i < 0) return null;
+        var spaceName = ChatMessage.SpaceNameOf(name[i..]);
+        DateTimeOffset? last = rs.TryGetProperty("lastReadTime", out var t) && DateTimeOffset.TryParse(t.GetString(), out var dt) ? dt : null;
+        return (spaceName, last);
+    }
+
     /// <summary>Space name for space/membership events, taken from the CloudEvent subject.</summary>
     public static string? SubjectSpaceName(WorkspaceEvent e)
     {

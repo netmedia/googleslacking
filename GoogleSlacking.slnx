@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/GoogleSlacking.Domain/GoogleSlacking.Domain.csproj" />
     <Project Path="src/GoogleSlacking.Google/GoogleSlacking.Google.csproj" />
+    <Project Path="src/GoogleSlacking.Core/GoogleSlacking.Core.csproj" />
     <Project Path="src/GoogleSlacking.Infrastructure/GoogleSlacking.Infrastructure.csproj" />
     <Project Path="src/GoogleSlacking.Api/GoogleSlacking.Api.csproj" />
   </Folder>

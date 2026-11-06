@@ -13,20 +13,22 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Custom service worker (src/sw.ts): precache + Web Push + notification clicks.
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
+      injectManifest: { globPatterns: ['**/*.{js,css,html,svg,png,woff2}'] },
+      devOptions: { enabled: true, type: 'module' }, // push works in `npm run dev` too
       includeAssets: ['icon.svg'],
       manifest: {
         name: 'GoogleSlacking',
         short_name: 'GoogleSlacking',
         description: 'A fast Google Chat client',
-        theme_color: '#3f0e40',
-        background_color: '#1a1d21',
+        theme_color: '#171b1f',
+        background_color: '#171b1f',
         display: 'standalone',
         start_url: '/',
         icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
-      },
-      workbox: {
-        navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api/, /^\/auth/, /^\/hubs/, /^\/healthz/],
       },
     }),
   ],
